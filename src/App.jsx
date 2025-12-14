@@ -1,23 +1,47 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect, useCallback } from "react";
 
-import Places from './components/Places.jsx';
-import { AVAILABLE_PLACES } from './data.js';
-import Modal from './components/Modal.jsx';
-import DeleteConfirmation from './components/DeleteConfirmation.jsx';
-import logoImg from './assets/logo.png';
+import Places from "./components/Places.jsx";
+import { AVAILABLE_PLACES } from "./data.js";
+import Modal from "./components/Modal.jsx";
+import DeleteConfirmation from "./components/DeleteConfirmation.jsx";
+import logoImg from "./assets/logo.png";
+import { sortPlacesByDistance } from "./loc.js";
+
+const storedIds = JSON.parse(localStorage.getItem("selectedPlaces") || []);
+const storedPlaces = storedIds.map((id) =>
+  AVAILABLE_PLACES.find((place) => place.id === id)
+);
 
 function App() {
-  const modal = useRef();
   const selectedPlace = useRef();
-  const [pickedPlaces, setPickedPlaces] = useState([]);
+  const [modalIsOpen, setModalIsOpen] = useState(false);
+  const [availablePlaces, setAvailablePlaces] = useState([]);
+  const [pickedPlaces, setPickedPlaces] = useState(storedPlaces);
+
+  // useEffect: يتم تنفيذها اخر شيء يعد مايتم تنفيذ كل مافي المكون!
+  // ملاحظة مهمة: use Effect لايتم تنفيذه مرة اخرى (في حالة اعادة تنفيذ المكون) الا اذا تغير قيمة الباراميتر الثاني الذي فيه
+  // في حال ماوضعنا باراميتر ثاني, راح يتم تنفذ useEffect في كل مرة رياكت يحدث المكون
+  // useEffect: لانستخدمه الا اذا احتجنا اليه فعلاً لأن غير غير ذلك سيعتبر ممارسة سيئة
+  // ليس في كل الاكواد التي تفعل تأثير جانبي نستخدم معاها useEffect .. الاستخدام الاساسي له هو لمنع اللوب اللانهائي او اذا كان لدينا كود نريد تنفيذه مرة وحدة على الاقل بعد تنفيذ كل الاشياء الاخرى التي بداخل المكون
+  useEffect(() => {
+    navigator.geolocation.getCurrentPosition((position) => {
+      const storedPlaces = sortPlacesByDistance(
+        AVAILABLE_PLACES,
+        position.coords.latitude,
+        position.coords.longitude
+      );
+
+      setAvailablePlaces(storedPlaces);
+    });
+  }, []);
 
   function handleStartRemovePlace(id) {
-    modal.current.open();
+    setModalIsOpen(true);
     selectedPlace.current = id;
   }
 
   function handleStopRemovePlace() {
-    modal.current.close();
+    setModalIsOpen(false);
   }
 
   function handleSelectPlace(id) {
@@ -28,18 +52,40 @@ function App() {
       const place = AVAILABLE_PLACES.find((place) => place.id === id);
       return [place, ...prevPickedPlaces];
     });
+
+    // في local storage لايمكن تخزين فيه مصفوفة اوا كائن, اذا اردنا ذلك فيجب تحويله الى سلسلة نصية
+    // على الرغم من هذه الاكواد ذات تأثير جانبي الا اننا لم نحتاج وضعها داخل useEffect وذلك بسبب:
+    // لايمكننا وضعنا احد Hooks داخل دالة داخلية
+    // واساساً ماراح يتم تنفيذ هذا الكود الا عندما يتم تنفيذ هذه الدالة والتي راح تنفذ عندما المستخدم ينقر على احدى الاماكن
+
+    // ليس في كل الاكواد التي تفعل تأثير جانبي نستخدم معاها useEffect .. الاستخدام الاساسي له هو لمنع اللوب اللانهائي او اذا كان لدينا كود نريد تنفيذه مرة وحدة على الاقل بعد تنفيذ كل الاشياء الاخرى التي بداخل المكون
+
+    const storedIds = JSON.parse(localStorage.getItem("selectedPlaces")) || [];
+    if (storedIds.indexOf(id) === -1) {
+      localStorage.setItem(
+        "selectedPlaces",
+        JSON.stringify([id, ...storedIds])
+      );
+    }
   }
 
-  function handleRemovePlace() {
+  // useCallback
+  const handleRemovePlace = useCallback(function handleRemovePlace() {
     setPickedPlaces((prevPickedPlaces) =>
       prevPickedPlaces.filter((place) => place.id !== selectedPlace.current)
     );
-    modal.current.close();
-  }
+    setModalIsOpen(false);
+
+    const storedIds = JSON.parse(localStorage.getItem("selectedPlaces")) || [];
+    localStorage.setItem(
+      "selectedPlaces",
+      JSON.stringify(storedIds.filter((id) => id !== selectedPlace.current))
+    );
+  }, []);
 
   return (
     <>
-      <Modal ref={modal}>
+      <Modal open={modalIsOpen} onClose={handleStopRemovePlace}>
         <DeleteConfirmation
           onCancel={handleStopRemovePlace}
           onConfirm={handleRemovePlace}
@@ -57,13 +103,14 @@ function App() {
       <main>
         <Places
           title="I'd like to visit ..."
-          fallbackText={'Select the places you would like to visit below.'}
+          fallbackText={"Select the places you would like to visit below."}
           places={pickedPlaces}
           onSelectPlace={handleStartRemovePlace}
         />
         <Places
           title="Available Places"
-          places={AVAILABLE_PLACES}
+          places={availablePlaces}
+          fallbackText="Sorting placing by distance..."
           onSelectPlace={handleSelectPlace}
         />
       </main>
